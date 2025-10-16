@@ -1,5 +1,6 @@
 import graphene
 from graphene_django import DjangoObjectType
+from graphene_django.filter import DjangoFilterConnectionField
 from .models import Customer, Product, Order
 from .filters import CustomerFilter, ProductFilter, OrderFilter
 import re
@@ -9,16 +10,19 @@ from django.db import IntegrityError, transaction
 class CustomerType(DjangoObjectType):
     class Meta:
         model = Customer
+        interfaces = (graphene.relay.Node, )
         fields = "__all__"
 
 class ProductType(DjangoObjectType):
     class Meta:
         model = Product
+        interfaces = (graphene.relay.Node, )
         fields = "__all__"
 
 class OrderType(DjangoObjectType):
     class Meta:
         model = Order
+        interfaces = (graphene.relay.Node, )
         fields = "__all__"
 
 # --- Root Query ---
