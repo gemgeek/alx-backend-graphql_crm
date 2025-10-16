@@ -1,6 +1,7 @@
 import graphene
 from graphene_django import DjangoObjectType
 from .models import Customer, Product, Order
+from .filters import CustomerFilter, ProductFilter, OrderFilter
 import re
 from django.db import IntegrityError, transaction
 
@@ -23,18 +24,11 @@ class OrderType(DjangoObjectType):
 # --- Root Query ---
 
 class Query(graphene.ObjectType):
-    all_customers = graphene.List(CustomerType)
-    all_products = graphene.List(ProductType)
-    all_orders = graphene.List(OrderType)
+    all_customers = DjangoFilterConnectionField(CustomerType, filterset_class=CustomerFilter)
 
-    def resolve_all_customers(root, info):
-        return Customer.objects.all()
+    all_products = DjangoFilterConnectionField(ProductType, filterset_class=ProductFilter)
 
-    def resolve_all_products(root, info):
-        return Product.objects.all()
-
-    def resolve_all_orders(root, info):
-        return Order.objects.all()
+    all_orders = DjangoFilterConnectionField(OrderType, filterset_class=OrderFilter)
 
 
 # --- Mutations ---
