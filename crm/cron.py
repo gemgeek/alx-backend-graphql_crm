@@ -45,3 +45,63 @@ def log_crm_heartbeat():
         
     except IOError as e:
         print(f"Error writing to heartbeat log: {e}")
+
+
+UPDATE_LOW_STOCK_MUTATION = gql("""
+    mutation UpdateLowStockProducts {
+      updateLowStockProducts {
+        success
+        updatedProducts {
+          name
+          stock
+        }
+      }
+    }
+""")
+
+def update_low_stock():
+    """
+    Cron job to find low-stock products, restock them via
+    GraphQL mutation, and log the updates.
+    """
+    now = datetime.datetime.now()
+    timestamp = now.strftime("%d/%m/%Y-%H:%M:%S")
+    log_file = "/tmp/low_stock_updates_log.txt"
+    
+    print(f"Running update_low_stock job at {timestamp}...")
+    
+    try:
+        result = CLIENT.execute(UPDATE_LOW_STOCK_MUTATION)
+        
+        with open(log_file, "a") as f:
+            f.write(f"--- Log entry: {timestamp} ---\n")
+            
+            if result and 'updateLowStockProducts' in result:
+                data = result['updateLowStockProducts']
+                
+                if data['success'] and 'updatedProducts' in data:
+                    products = data['updatedProducts']
+                    if not products:
+                        f.write("No low-stock products found to update.\n")
+                        print("No low-stock products found.")
+                    else:
+                        f.write(f"Successfully restocked {len(products)} products:\n")
+                        print(f"Successfully restocked {len(products)} products.")
+                        for product in products:
+                            f.write(f"  - Name: {product['name']}, New Stock: {product['stock']}\n")
+                else:
+                    f.write("Mutation failed or returned no success message.\n")
+                    print("Mutation failed or returned no success message.")
+            else:
+                f.write("Error: Invalid response from GraphQL mutation.\n")
+                print("Error: Invalid response from GraphQL mutation.")
+        
+    except Exception as e:
+        error_message = f"Error running low_stock update: {e}\n"
+        print(error_message)
+        try:
+            with open(log_file, "a") as f:
+                f.write(f"--- ERROR: {timestamp} ---\n")
+                f.write(error_message)
+        except IOError:
+            pass         

@@ -5,13 +5,14 @@ from .models import Customer, Product, Order
 from .filters import CustomerFilter, ProductFilter, OrderFilter
 import re
 from django.db import IntegrityError, transaction
+from django.db.models import F  
 
 
 class CustomerType(DjangoObjectType):
     class Meta:
         model = Customer
         interfaces = (graphene.relay.Node, )
-        fields = "__all__"
+        fields = "__all__"     
 
 class ProductType(DjangoObjectType):
     class Meta:
@@ -29,9 +30,7 @@ class OrderType(DjangoObjectType):
 
 class Query(graphene.ObjectType):
     all_customers = DjangoFilterConnectionField(CustomerType, filterset_class=CustomerFilter)
-
     all_products = DjangoFilterConnectionField(ProductType, filterset_class=ProductFilter)
-
     all_orders = DjangoFilterConnectionField(OrderType, filterset_class=OrderFilter)
 
 
@@ -43,13 +42,11 @@ class CreateCustomer(graphene.Mutation):
         email = graphene.String(required=True)
         phone = graphene.String()
 
-    # Output fields
     customer = graphene.Field(CustomerType)
     message = graphene.String()
 
     @staticmethod
     def mutate(root, info, name, email, phone=None):
-        # Phone number validation 
         if phone and not re.match(r'^(\+?[1-9]\d{1,14}|(\d{3}-){2}\d{4})$', phone):
             raise Exception("Invalid phone number format. Use +1234567890 or 123-456-7890.")
 
@@ -58,6 +55,7 @@ class CreateCustomer(graphene.Mutation):
             return CreateCustomer(customer=customer, message="Customer created successfully!")
         except IntegrityError:
             raise Exception("Email already exists. Please use a different email.")
+            
 
 class CustomerInput(graphene.InputObjectType):
     name = graphene.String(required=True)
@@ -68,7 +66,6 @@ class BulkCreateCustomers(graphene.Mutation):
     class Arguments:
         customers_data = graphene.List(graphene.NonNull(CustomerInput), required=True)
 
-    # Output fields
     customers = graphene.List(CustomerType)
     errors = graphene.List(graphene.String)
 
@@ -77,16 +74,13 @@ class BulkCreateCustomers(graphene.Mutation):
         successful_customers = []
         error_messages = []
 
-        # Use a transaction to ensure atomicity if needed, though we want partial success
         for i, customer_data in enumerate(customers_data):
             try:
-                # Validate phone
                 if customer_data.phone and not re.match(r'^(\+?[1-9]\d{1,14}|(\d{3}-){2}\d{4})$', customer_data.phone):
-                    raise ValueError(f"Record {i+1}: Invalid phone number format.")
+                        raise ValueError(f"Record {i+1}: Invalid phone number format.")
 
-                # Check for existing email manually for bulk operation
                 if Customer.objects.filter(email=customer_data.email).exists():
-                     raise ValueError(f"Record {i+1}: Email '{customer_data.email}' already exists.")
+                        raise ValueError(f"Record {i+1}: Email '{customer_data.email}' already exists.")
 
                 customer = Customer(
                     name=customer_data.name,
@@ -97,7 +91,6 @@ class BulkCreateCustomers(graphene.Mutation):
             except ValueError as e:
                 error_messages.append(str(e))
 
-        # Use bulk_create for efficiency
         if successful_customers:
             Customer.objects.bulk_create(successful_customers)
 
@@ -132,14 +125,27 @@ class CreateOrder(graphene.Mutation):
     @staticmethod
     def mutate(root, info, customer_id, product_ids, order_date=None):
         try:
-            customer = Customer.objects.get(pk=customer_id)
-        except Customer.DoesNotExist:
+            customer = graphene.relay.Node.get_node_from_global_id(info, customer_id, Customer)
+            if not customer:
+                 raise Exception("Invalid customer ID.")
+        except Exception:
             raise Exception("Invalid customer ID.")
 
         if not product_ids:
             raise Exception("At least one product must be selected.")
 
-        products = Product.objects.filter(pk__in=product_ids)
+        actual_product_ids = []
+        for pid in product_ids:
+            try:
+                product_node = graphene.relay.Node.get_node_from_global_id(info, pid, Product)
+                if not product_node:
+                    raise Exception(f"Invalid product ID: {pid}")
+                actual_product_ids.append(product_node.id)
+            except Exception:
+                raise Exception(f"Invalid product ID: {pid}")
+
+
+        products = Product.objects.filter(pk__in=actual_product_ids)
         if products.count() != len(product_ids):
             raise Exception("One or more product IDs are invalid.")
 
@@ -156,6 +162,25 @@ class CreateOrder(graphene.Mutation):
         return CreateOrder(order=order)
 
 
+class UpdateLowStockProducts(graphene.Mutation):
+    success = graphene.Boolean()
+    updated_products = graphene.List(ProductType)
+
+    @classmethod
+    def mutate(cls, root, info):
+        low_stock_products = Product.objects.filter(stock__lt=10)
+        
+        product_ids = list(low_stock_products.values_list('id', flat=True))
+
+        if not product_ids:
+            return UpdateLowStockProducts(success=True, updated_products=[])
+
+        low_stock_products.update(stock=F('stock') + 10)
+
+        updated_products_qs = Product.objects.filter(id__in=product_ids)
+        
+        return UpdateLowStockProducts(success=True, updated_products=updated_products_qs)
+
 # --- Root Mutation ---
 
 class Mutation(graphene.ObjectType):
@@ -163,3 +188,8 @@ class Mutation(graphene.ObjectType):
     bulk_create_customers = BulkCreateCustomers.Field()
     create_product = CreateProduct.Field()
     create_order = CreateOrder.Field()
+    
+    update_low_stock_products = UpdateLowStockProducts.Field()
+
+
+schema = graphene.Schema(query=Query, mutation=Mutation)
