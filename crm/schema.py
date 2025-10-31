@@ -6,7 +6,7 @@ from crm.models import Product
 from .filters import CustomerFilter, ProductFilter, OrderFilter
 import re
 from django.db import IntegrityError, transaction
-from django.db.models import F  
+from django.db.models import F, Sum  
 
 
 class CustomerType(DjangoObjectType):
@@ -33,6 +33,23 @@ class Query(graphene.ObjectType):
     all_customers = DjangoFilterConnectionField(CustomerType, filterset_class=CustomerFilter)
     all_products = DjangoFilterConnectionField(ProductType, filterset_class=ProductFilter)
     all_orders = DjangoFilterConnectionField(OrderType, filterset_class=OrderFilter)
+
+    total_customers = graphene.Int()
+    total_orders = graphene.Int()
+    total_revenue = graphene.Decimal()
+
+    def resolve_total_customers(self, info, **kwargs):
+        # Returns the total count of all customers
+        return Customer.objects.count()
+
+    def resolve_total_orders(self, info, **kwargs):
+        # Returns the total count of all orders
+        return Order.objects.count()
+
+    def resolve_total_revenue(self, info, **kwargs):
+        # Returns the sum of the 'total_amount' field from all orders
+        result = Order.objects.aggregate(total=Sum('total_amount'))
+        return result['total'] or 0
 
 
 # --- Mutations ---
